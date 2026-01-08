@@ -1,16 +1,15 @@
 FROM alpine:latest
 
-# نصب ابزارهای لازم
-RUN apk add --no-cache wget unzip ca-certificates
+RUN apk add --no-cache wget unzip ca-certificates bash
 
-# دانلود و نصب دستی Xray
 RUN wget https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
     unzip Xray-linux-64.zip -d /usr/local/bin/ && \
     chmod +x /usr/local/bin/xray && \
     rm Xray-linux-64.zip
 
-# کپی فایل کانفیگ
 COPY config.json /etc/xray/config.json
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# اجرای Xray
-CMD ["/usr/local/bin/xray", "run", "-c", "/etc/xray/config.json"]
+CMD ["/entrypoint.sh"]
+]
