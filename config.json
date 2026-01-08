@@ -1,9 +1,10 @@
 {
   "log": {
-    "loglevel": "warning"
+    "loglevel": "info"
   },
   "inbounds": [{
     "port": 8080,
+    "listen": "0.0.0.0",
     "protocol": "vless",
     "settings": {
       "clients": [{
@@ -15,7 +16,7 @@
     "streamSettings": {
       "network": "ws",
       "wsSettings": {
-        "path": "/ws"
+        "path": "/751dcf33-b568-4150-8069-8b90a9429cfb"
       }
     }
   }],
