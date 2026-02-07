@@ -1,378 +1,370 @@
 #!/bin/bash
 
-clear
+# entrypoint.sh
+set -e
 
-echo -e "\033[1;32m##########################################################################\033[0m"
-echo -e "\033[1;31m#         Railway Deployment Script with SSH over Ngrok                  #\033[0m"
-echo -e "\033[1;32m##########################################################################\033[0m"
-echo ""
+# Function to set terminal colors
+set_colors() {
+    RED='\033[1;31m'
+    GREEN='\033[1;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[1;34m'
+    MAGENTA='\033[1;35m'
+    CYAN='\033[1;36m'
+    WHITE='\033[1;37m'
+    NC='\033[0m' # No Color
+}
 
-#--------- info Variables ---------#
-read -r -p $'\033[1;33mEnter User (default: telegram): \033[0m' input_user
-User=${input_user:-telegram}
-
-read -r -p $'\033[1;33mEnter Pass (default: @d_s_d_c1): \033[0m' input_pass
-Pass=${input_pass:-@d_s_d_c1}
-
-read -r -p $'\033[1;33mEnter Ngrok Token: \033[0m' ngrok_token
-if [ -z "$ngrok_token" ]; then
-    echo -e "\033[1;31mError: Ngrok Token is required!\033[0m"
-    exit 1
-fi
-
-read -r -p $'\033[1;33mTCP Port (default: 22): \033[0m' tcp_port
-tcp_port=${tcp_port:-22}
-
-read -r -p $'\033[1;33mUDP Port (default: 7300): \033[0m' udp_port
-udp_port=${udp_port:-7300}
-
-echo ""
-echo "--------------------------------------------------------------------------"
-echo -e "\033[1;32m                      Input Complete ✓                     \033[0m"
-echo "--------------------------------------------------------------------------"
-sleep 2
-clear
-
-#-------- Get IP and Country Info -----------#
-echo -e "\033[1;33m# Getting IP and Country Information... \033[0m"
-
-# Try multiple IP services
-IP_SERVICES=(
-    "https://api.ipify.org"
-    "https://ifconfig.me/ip"
-    "https://icanhazip.com"
-    "https://ident.me"
-)
-
-for service in "${IP_SERVICES[@]}"; do
-    IP_ADDRESS=$(curl -s --connect-timeout 5 "$service")
-    if [ -n "$IP_ADDRESS" ] && [[ "$IP_ADDRESS" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo -e "\033[1;32m✓ Got IP from $service\033[0m"
-        break
-    fi
-done
-
-if [ -z "$IP_ADDRESS" ]; then
-    IP_ADDRESS="Unable to fetch"
-fi
-
-# Get country
-COUNTRY_SERVICES=(
-    "https://ipapi.co/country"
-    "https://ipinfo.io/country"
-    "https://api.ip.sb/geoip"
-)
-
-for service in "${COUNTRY_SERVICES[@]}"; do
-    COUNTRY_INFO=$(curl -s --connect-timeout 5 "$service")
-    if [ -n "$COUNTRY_INFO" ]; then
-        # Extract country code if it's JSON
-        if [[ "$COUNTRY_INFO" == *"country"* ]]; then
-            COUNTRY_CODE=$(echo "$COUNTRY_INFO" | grep -o '"country":"[^"]*"' | cut -d'"' -f4)
-            COUNTRY_NAME=$(echo "$COUNTRY_INFO" | grep -o '"country_name":"[^"]*"' | cut -d'"' -f4)
-        else
-            COUNTRY_CODE="$COUNTRY_INFO"
-            # Get country name from code
-            COUNTRY_NAME=$(curl -s "https://restcountries.com/v3.1/alpha/$COUNTRY_CODE" | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4)
-        fi
-        
-        if [ -n "$COUNTRY_CODE" ]; then
-            echo -e "\033[1;32m✓ Got country info from $service\033[0m"
-            break
-        fi
-    fi
-done
-
-if [ -z "$COUNTRY_CODE" ]; then
-    COUNTRY_CODE="Unknown"
-    COUNTRY_NAME="Unknown"
-fi
-
-# Get flag emoji based on country code
-get_flag_emoji() {
-    local country_code=$1
-    # Convert to uppercase
-    country_code=$(echo "$country_code" | tr '[:lower:]' '[:upper:]')
-    
-    # List of common country flag emojis
-    declare -A flags=(
-        ["US"]="🇺🇸" ["GB"]="🇬🇧" ["DE"]="🇩🇪" ["FR"]="🇫🇷" ["JP"]="🇯🇵"
-        ["KR"]="🇰🇷" ["CN"]="🇨🇳" ["RU"]="🇷🇺" ["BR"]="🇧🇷" ["IN"]="🇮🇳"
-        ["CA"]="🇨🇦" ["AU"]="🇦🇺" ["SG"]="🇸🇬" ["NL"]="🇳🇱" ["SE"]="🇸🇪"
-        ["NO"]="🇳🇴" ["FI"]="🇫🇮" ["DK"]="🇩🇰" ["ES"]="🇪🇸" ["IT"]="🇮🇹"
-        ["TR"]="🇹🇷" ["SA"]="🇸🇦" ["AE"]="🇦🇪" ["EG"]="🇪🇬" ["ZA"]="🇿🇦"
-        ["MX"]="🇲🇽" ["AR"]="🇦🇷" ["ID"]="🇮🇩" ["MY"]="🇲🇾" ["TH"]="🇹🇭"
-        ["VN"]="🇻🇳" ["PH"]="🇵🇭" ["PK"]="🇵🇰" ["BD"]="🇧🇩" ["IR"]="🇮🇷"
-        ["IQ"]="🇮🇶" ["SY"]="🇸🇾" ["YE"]="🇾🇪" ["IL"]="🇮🇱" ["JO"]="🇯🇴"
-        ["KW"]="🇰🇼" ["QA"]="🇶🇦" ["OM"]="🇴🇲" ["BH"]="🇧🇭" ["LB"]="🇱🇧"
+# Function to get IP address
+get_ip() {
+    echo -e "${CYAN}[*] Getting IP address...${NC}"
+    local ip_services=(
+        "https://api.ipify.org"
+        "https://ifconfig.me/ip"
+        "https://icanhazip.com"
+        "https://ident.me"
     )
     
-    if [ -n "${flags[$country_code]}" ]; then
-        echo "${flags[$country_code]}"
-    else
-        # Generate flag from country code (regional indicator symbols)
-        if [[ ${#country_code} -eq 2 ]]; then
-            local first=$(echo "${country_code:0:1}" | tr '[:upper:]' '[:lower:]')
-            local second=$(echo "${country_code:1:1}" | tr '[:upper:]' '[:lower:]')
-            echo "$(printf "\\U$(printf '%08x' $((0x1F1E6 + $(printf '%d' "'$first") - 97)) )")$(printf "\\U$(printf '%08x' $((0x1F1E6 + $(printf '%d' "'$second") - 97)) )")"
-        else
-            echo "🏳️"
-        fi
-    fi
-}
-
-FLAG_EMOJI=$(get_flag_emoji "$COUNTRY_CODE")
-COUNTRY_VPS_AND_FLAG="$FLAG_EMOJI $COUNTRY_NAME ($COUNTRY_CODE)"
-
-# Display information
-echo -e "\033[1;32m══════════════════════════════════════════════════════════════\033[0m"
-echo -e "\033[1;33m                  VPS Information                            \033[0m"
-echo -e "\033[1;32m══════════════════════════════════════════════════════════════\033[0m"
-echo -e "\033[1;36m• IP Address: \033[1;33m$IP_ADDRESS\033[0m"
-echo -e "\033[1;36m• Country: \033[1;33m$COUNTRY_VPS_AND_FLAG\033[0m"
-echo -e "\033[1;36m• User: \033[1;33m$User\033[0m"
-echo -e "\033[1;36m• Password: \033[1;33m$Pass\033[0m"
-echo -e "\033[1;32m══════════════════════════════════════════════════════════════\033[0m"
-echo ""
-
-LOG_FILE="/tmp/railway_deploy.log"
-
-# Check if we're on Railway
-echo -e "\033[1;33m# Checking Railway environment... \033[0m"
-if [ -n "$RAILWAY_ENVIRONMENT" ] || [ -n "$RAILWAY_PROJECT_ID" ] || [ -n "$RAILWAY_SERVICE_ID" ]; then
-    echo -e "\033[1;32m✓ Running on Railway Platform\033[0m"
-    IS_RAILWAY=true
-else
-    echo -e "\033[1;33m⚠ Not running on Railway (local deployment)\033[0m"
-    IS_RAILWAY=false
-fi
-
-# Install required packages
-echo -e "\033[1;33m# Installing required packages... \033[0m"
-apt-get update >> $LOG_FILE 2>&1
-apt-get install -y curl wget git openssh-server python3 python3-pip socat net-tools >> $LOG_FILE 2>&1
-
-# Install Ngrok
-echo -e "\033[1;33m# Installing Ngrok... \033[0m"
-if [ ! -f /usr/local/bin/ngrok ]; then
-    curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | tar xz -C /usr/local/bin/
-    chmod +x /usr/local/bin/ngrok
-fi
-
-# Configure Ngrok
-echo -e "\033[1;33m# Configuring Ngrok... \033[0m"
-ngrok config add-authtoken "$ngrok_token" >> $LOG_FILE 2>&1
-
-# Setup SSH
-echo -e "\033[1;33m# Setting up SSH server... \033[0m"
-
-# Create user if not exists
-if ! id "$User" &>/dev/null; then
-    useradd -m -s /bin/bash "$User"
-    echo "$User:$Pass" | chpasswd
-fi
-
-# Configure SSH
-mkdir -p /var/run/sshd
-echo "Port $tcp_port" >> /etc/ssh/sshd_config
-echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
-echo "PermitRootLogin no" >> /etc/ssh/sshd_config
-echo "AllowUsers $User" >> /etc/ssh/sshd_config
-echo "ClientAliveInterval 60" >> /etc/ssh/sshd_config
-echo "ClientAliveCountMax 3" >> /etc/ssh/sshd_config
-
-# Start SSH
-/usr/sbin/sshd -D >> $LOG_FILE 2>&1 &
-
-# Install and setup UDP relay
-echo -e "\033[1;33m# Setting up UDP relay... \033[0m"
-if [ ! -d "/tmp/udpgw" ]; then
-    git clone https://github.com/mukswilly/udpgw.git /tmp/udpgw >> $LOG_FILE 2>&1
-    cd /tmp/udpgw || exit 1
-    
-    # Install Go if not present
-    if ! command -v go &> /dev/null; then
-        wget https://go.dev/dl/go1.21.1.linux-amd64.tar.gz >> $LOG_FILE 2>&1
-        tar -C /usr/local -xzf go1.21.1.linux-amd64.tar.gz
-        export PATH=$PATH:/usr/local/go/bin
-    fi
-    
-    cd cmd && go build -o server >> $LOG_FILE 2>&1
-    ./server -port "$udp_port" generate >> $LOG_FILE 2>&1
-    ./server run >> $LOG_FILE 2>&1 &
-fi
-
-# Function to get Ngrok tunnel URL
-get_ngrok_url() {
-    sleep 3
-    NGROK_API="http://127.0.0.1:4040/api/tunnels"
-    for i in {1..10}; do
-        URL=$(curl -s "$NGROK_API" | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
-        if [ -n "$URL" ]; then
-            echo "$URL"
+    for service in "${ip_services[@]}"; do
+        IP=$(timeout 5 curl -s "$service" || true)
+        if [ -n "$IP" ] && [[ "$IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo -e "${GREEN}[✓] Got IP from $service${NC}"
+            echo "$IP"
             return 0
         fi
-        sleep 1
     done
-    echo "Unable to get Ngrok URL"
+    echo "Unknown"
 }
 
-# Start Ngrok tunnels
-echo -e "\033[1;33m# Starting Ngrok tunnels... \033[0m"
+# Function to get country info
+get_country() {
+    echo -e "${CYAN}[*] Getting country information...${NC}"
+    local country_info=$(timeout 5 curl -s "https://ipinfo.io/json" || true)
+    
+    if [ -n "$country_info" ]; then
+        local country_code=$(echo "$country_info" | grep -o '"country":"[^"]*"' | cut -d'"' -f4)
+        local city=$(echo "$country_info" | grep -o '"city":"[^"]*"' | cut -d'"' -f4)
+        local country_name=$(echo "$country_info" | grep -o '"country":"[^"]*"' | cut -d'"' -f4)
+        
+        # Convert to uppercase for flag detection
+        country_name_upper=$(echo "$country_name" | tr '[:lower:]' '[:upper:]')
+        
+        # Get flag emoji
+        case "$country_name_upper" in
+            "US") flag="🇺🇸" ;;
+            "GB"|"UK") flag="🇬🇧" ;;
+            "DE") flag="🇩🇪" ;;
+            "FR") flag="🇫🇷" ;;
+            "JP") flag="🇯🇵" ;;
+            "KR") flag="🇰🇷" ;;
+            "CN") flag="🇨🇳" ;;
+            "RU") flag="🇷🇺" ;;
+            "BR") flag="🇧🇷" ;;
+            "IN") flag="🇮🇳" ;;
+            "CA") flag="🇨🇦" ;;
+            "AU") flag="🇦🇺" ;;
+            "SG") flag="🇸🇬" ;;
+            "NL") flag="🇳🇱" ;;
+            "SE") flag="🇸🇪" ;;
+            "NO") flag="🇳🇴" ;;
+            "FI") flag="🇫🇮" ;;
+            "DK") flag="🇩🇰" ;;
+            "ES") flag="🇪🇸" ;;
+            "IT") flag="🇮🇹" ;;
+            "TR") flag="🇹🇷" ;;
+            "SA") flag="🇸🇦" ;;
+            "AE") flag="🇦🇪" ;;
+            "EG") flag="🇪🇬" ;;
+            "ZA") flag="🇿🇦" ;;
+            "MY") flag="🇲🇾" ;;
+            "TH") flag="🇹🇭" ;;
+            "VN") flag="🇻🇳" ;;
+            "ID") flag="🇮🇩" ;;
+            "PH") flag="🇵🇭" ;;
+            *) flag="🏳️" ;;
+        esac
+        
+        echo -e "${GREEN}[✓] Location detected: $city, $country_name${NC}"
+        echo "$flag $city, $country_name"
+    else
+        echo "🏳️ Unknown Location"
+    fi
+}
 
-# Start TCP tunnel
-echo -e "\033[1;36m• Starting TCP tunnel on port $tcp_port...\033[0m"
-ngrok tcp "$tcp_port" --log stdout >> $LOG_FILE 2>&1 &
-TCP_PID=$!
-
-# Start UDP tunnel
-echo -e "\033[1;36m• Starting UDP tunnel on port $udp_port...\033[0m"
-ngrok udp "$udp_port" --log stdout >> $LOG_FILE 2>&1 &
-UDP_PID=$!
-
-sleep 5
-
-# Get tunnel URLs
-TCP_URL=$(get_ngrok_url | grep "tcp://")
-UDP_URL=$(ngrok tunnels list 2>/dev/null | grep "udp" | awk '{print $3}')
-
-# Clear and show results
-clear
-echo -e "\033[1;32m══════════════════════════════════════════════════════════════\033[0m"
-echo -e "\033[1;31m                DEPLOYMENT SUCCESSFUL ✓                     \033[0m"
-echo -e "\033[1;32m══════════════════════════════════════════════════════════════\033[0m"
-echo ""
-echo -e "\033[1;33m                  VPS INFORMATION                          \033[0m"
-echo -e "\033[1;36m• IP Address: \033[1;33m$IP_ADDRESS\033[0m"
-echo -e "\033[1;36m• Country: \033[1;33m$COUNTRY_VPS_AND_FLAG\033[0m"
-echo -e "\033[1;36m• Platform: \033[1;33mRailway\033[0m"
-echo ""
-echo -e "\033[1;33m                  ACCOUNT DETAILS                          \033[0m"
-echo -e "\033[1;36m• Username: \033[1;33m$User\033[0m"
-echo -e "\033[1;36m• Password: \033[1;33m$Pass\033[0m"
-echo ""
-echo -e "\033[1;33m                  TUNNEL URLs                             \033[0m"
-if [ -n "$TCP_URL" ]; then
-    echo -e "\033[1;36m• TCP Tunnel: \033[1;33m$TCP_URL\033[0m"
-    HOST_PORT=$(echo "$TCP_URL" | sed 's/tcp:\/\///')
-    HOST=$(echo "$HOST_PORT" | cut -d':' -f1)
-    PORT=$(echo "$HOST_PORT" | cut -d':' -f2)
-    echo -e "\033[1;36m• SSH Connection: \033[1;33mssh $User@$HOST -p $PORT\033[0m"
-else
-    echo -e "\033[1;31m• TCP Tunnel: Not available\033[0m"
-fi
-
-if [ -n "$UDP_URL" ]; then
-    echo -e "\033[1;36m• UDP Tunnel: \033[1;33m$UDP_URL\033[0m"
-else
-    echo -e "\033[1;31m• UDP Tunnel: Not available\033[0m"
-fi
-echo ""
-echo -e "\033[1;33m                  CONNECTION STRINGS                      \033[0m"
-if [ -n "$HOST" ] && [ -n "$PORT" ]; then
-    echo -e "\033[1;36m• HTTP Custom Format:\033[0m"
-    echo -e "\033[1;33m  $HOST:$PORT@$User:$Pass\033[0m"
+# Function to display banner
+display_banner() {
+    clear
+    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}                  RAILWAY SSH SERVER WITH NGROK                ${NC}"
+    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "\033[1;36m• For SSH Clients:\033[0m"
-    echo -e "\033[1;33m  Host: $HOST\033[0m"
-    echo -e "\033[1;33m  Port: $PORT\033[0m"
-    echo -e "\033[1;33m  User: $User\033[0m"
-    echo -e "\033[1;33m  Pass: $Pass\033[0m"
-fi
-echo ""
-echo -e "\033[1;32m══════════════════════════════════════════════════════════════\033[0m"
-echo -e "\033[1;35m• Channel: \033[1;34mD_S_D_C1.T.ME\033[0m"
-echo -e "\033[1;35m• Developer: \033[1;34ml_s_I_I.T.ME\033[0m"
-echo -e "\033[1;32m══════════════════════════════════════════════════════════════\033[0m"
-
-# Keep the script running
-echo -e "\033[1;33m\n# Press Ctrl+C to stop the tunnels\n\033[0m"
-echo -e "\033[1;33m# Tunnels are running in the background...\033[0m"
-
-# Create railway.json for Railway deployment
-cat > railway.json << EOF
-{
-  "$schema": "https://railway.app/railway.schema.json",
-  "build": {
-    "builder": "NIXPACKS"
-  },
-  "deploy": {
-    "startCommand": "chmod +x deploy.sh && ./deploy.sh",
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
-  }
 }
+
+# Function to configure and start SSH
+setup_ssh() {
+    echo -e "${YELLOW}[1/6] Configuring SSH Server...${NC}"
+    
+    # Create user if not exists
+    if ! id "$SSH_USER" &>/dev/null; then
+        useradd -m -s /bin/bash "$SSH_USER"
+        echo "$SSH_USER:$SSH_PASS" | chpasswd
+        echo -e "${GREEN}[✓] User $SSH_USER created${NC}"
+    fi
+    
+    # Configure SSH
+    cat > /etc/ssh/sshd_config << EOF
+Port $TCP_PORT
+Protocol 2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_dsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+UsePrivilegeSeparation yes
+KeyRegenerationInterval 3600
+ServerKeyBits 1024
+SyslogFacility AUTH
+LogLevel INFO
+LoginGraceTime 120
+PermitRootLogin no
+StrictModes yes
+RSAAuthentication yes
+PubkeyAuthentication yes
+IgnoreRhosts yes
+RhostsRSAAuthentication no
+HostbasedAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+PasswordAuthentication yes
+X11Forwarding yes
+X11DisplayOffset 10
+PrintMotd no
+PrintLastLog yes
+TCPKeepAlive yes
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server
+UsePAM yes
+ClientAliveInterval 60
+ClientAliveCountMax 3
+AllowUsers $SSH_USER
 EOF
+    
+    # Generate SSH keys if not exist
+    ssh-keygen -A
+    
+    # Start SSH
+    /usr/sbin/sshd -D &
+    echo -e "${GREEN}[✓] SSH Server started on port $TCP_PORT${NC}"
+}
 
-# Create a simpler deployment script for Railway
-cat > deploy.sh << 'EOF'
-#!/bin/bash
+# Function to start UDP Gateway
+setup_udpgw() {
+    echo -e "${YELLOW}[2/6] Starting UDP Gateway...${NC}"
+    cd /opt/udpgw/cmd
+    ./server run > /tmp/udpgw.log 2>&1 &
+    echo -e "${GREEN}[✓] UDP Gateway started on port $UDP_PORT${NC}"
+}
 
-# Get Ngrok token from Railway variables
-NGROK_TOKEN=${NGROK_TOKEN}
-USER=${SSH_USER:-telegram}
-PASS=${SSH_PASS:-@d_s_d_c1}
-TCP_PORT=${TCP_PORT:-22}
-UDP_PORT=${UDP_PORT:-7300}
+# Function to configure Ngrok
+setup_ngrok() {
+    echo -e "${YELLOW}[3/6] Configuring Ngrok with provided token...${NC}"
+    
+    # Check if token is set
+    if [ -z "$NGROK_TOKEN" ]; then
+        echo -e "${RED}[✗] ERROR: NGROK_TOKEN is empty!${NC}"
+        exit 1
+    fi
+    
+    # Configure ngrok
+    ngrok config add-authtoken "$NGROK_TOKEN" > /dev/null 2>&1
+    echo -e "${GREEN}[✓] Ngrok configured successfully${NC}"
+    echo -e "${CYAN}[*] Token: ${NGROK_TOKEN:0:15}...${NC}"
+}
 
-if [ -z "$NGROK_TOKEN" ]; then
-    echo "Error: NGROK_TOKEN environment variable is required!"
-    exit 1
-fi
+# Function to start Ngrok tunnels
+start_tunnels() {
+    echo -e "${YELLOW}[4/6] Starting Ngrok Tunnels...${NC}"
+    
+    # Start TCP tunnel for SSH
+    echo -e "${CYAN}  • Starting TCP tunnel on port $TCP_PORT...${NC}"
+    nohup ngrok tcp "$TCP_PORT" --log=stdout > /tmp/ngrok_tcp.log 2>&1 &
+    TCP_PID=$!
+    sleep 3
+    
+    # Start UDP tunnel
+    echo -e "${CYAN}  • Starting UDP tunnel on port $UDP_PORT...${NC}"
+    nohup ngrok udp "$UDP_PORT" --log=stdout > /tmp/ngrok_udp.log 2>&1 &
+    UDP_PID=$!
+    sleep 3
+    
+    echo -e "${GREEN}[✓] Ngrok tunnels started${NC}"
+}
 
-# Install packages
-apt-get update
-apt-get install -y curl openssh-server
+# Function to get tunnel URLs
+get_tunnel_urls() {
+    echo -e "${YELLOW}[5/6] Fetching tunnel URLs...${NC}"
+    
+    # Wait for tunnels to initialize
+    sleep 5
+    
+    # Get TCP tunnel URL
+    for i in {1..15}; do
+        TCP_URL=$(timeout 5 curl -s http://localhost:4040/api/tunnels 2>/dev/null | grep -o 'tcp://[^"]*' || true)
+        if [ -n "$TCP_URL" ]; then
+            echo -e "${GREEN}[✓] TCP Tunnel: $TCP_URL${NC}"
+            break
+        fi
+        sleep 2
+    done
+    
+    # Get UDP tunnel URL
+    UDP_URL=$(timeout 5 curl -s http://localhost:4040/api/tunnels 2>/dev/null | grep -o 'udp://[^"]*' || true)
+    if [ -n "$UDP_URL" ]; then
+        echo -e "${GREEN}[✓] UDP Tunnel: $UDP_URL${NC}"
+    fi
+    
+    # Extract host and port from TCP URL
+    if [ -n "$TCP_URL" ]; then
+        HOST_PORT=$(echo "$TCP_URL" | sed 's/tcp:\/\///')
+        HOST=$(echo "$HOST_PORT" | cut -d':' -f1)
+        PORT=$(echo "$HOST_PORT" | cut -d':' -f2)
+    fi
+}
 
-# Install Ngrok
-curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | tar xz -C /usr/local/bin/
-chmod +x /usr/local/bin/ngrok
+# Function to display final results
+display_results() {
+    echo -e "${YELLOW}[6/6] Preparing connection details...${NC}"
+    
+    # Get server information
+    IP_ADDRESS=$(get_ip)
+    COUNTRY_INFO=$(get_country)
+    
+    # Display banner
+    display_banner
+    
+    # Display server info
+    echo -e "${YELLOW}                  SERVER INFORMATION${NC}"
+    echo -e "${CYAN}• IP Address:${WHITE} $IP_ADDRESS${NC}"
+    echo -e "${CYAN}• Location:${WHITE} $COUNTRY_INFO${NC}"
+    echo -e "${CYAN}• Platform:${WHITE} Railway + Docker + Ngrok${NC}"
+    echo ""
+    
+    # Display account details
+    echo -e "${YELLOW}                  ACCOUNT DETAILS${NC}"
+    echo -e "${CYAN}• Username:${WHITE} $SSH_USER${NC}"
+    echo -e "${CYAN}• Password:${WHITE} $SSH_PASS${NC}"
+    echo ""
+    
+    # Display tunnel information
+    echo -e "${YELLOW}                  TUNNEL INFORMATION${NC}"
+    if [ -n "$TCP_URL" ]; then
+        echo -e "${CYAN}• TCP Tunnel:${WHITE} $TCP_URL${NC}"
+        echo -e "${CYAN}• SSH Command:${WHITE} ssh $SSH_USER@$HOST -p $PORT${NC}"
+    else
+        echo -e "${RED}• TCP Tunnel: Not available${NC}"
+    fi
+    
+    if [ -n "$UDP_URL" ]; then
+        echo -e "${CYAN}• UDP Tunnel:${WHITE} $UDP_URL${NC}"
+    else
+        echo -e "${RED}• UDP Tunnel: Not available${NC}"
+    fi
+    
+    echo ""
+    
+    # Display connection string for HTTP Custom
+    echo -e "${YELLOW}                  CONNECTION STRING${NC}"
+    if [ -n "$HOST" ] && [ -n "$PORT" ]; then
+        echo -e "${CYAN}• For HTTP Custom/Proxy:${NC}"
+        echo -e "${WHITE}  $HOST:$PORT@$SSH_USER:$SSH_PASS${NC}"
+        echo ""
+        echo -e "${CYAN}• For SSH Clients:${NC}"
+        echo -e "${WHITE}  Host: $HOST${NC}"
+        echo -e "${WHITE}  Port: $PORT${NC}"
+        echo -e "${WHITE}  User: $SSH_USER${NC}"
+        echo -e "${WHITE}  Pass: $SSH_PASS${NC}"
+    fi
+    
+    echo ""
+    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${MAGENTA}• Channel: ${BLUE}D_S_D_C1.T.ME${NC}"
+    echo -e "${MAGENTA}• Developer: ${BLUE}l_s_I_I.T.ME${NC}"
+    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}[*] Status: All services are running${NC}"
+    echo -e "${CYAN}[*] Check Railway logs for tunnel status${NC}"
+    echo -e "${CYAN}[*] Container is running in background${NC}"
+}
 
-# Configure Ngrok
-ngrok config add-authtoken "$NGROK_TOKEN"
+# Function to monitor services
+monitor_services() {
+    echo -e "${CYAN}[*] Starting service monitor...${NC}"
+    while true; do
+        # Check SSH
+        if ! pgrep sshd > /dev/null; then
+            echo -e "${RED}[!] SSH service stopped, restarting...${NC}"
+            /usr/sbin/sshd -D &
+        fi
+        
+        # Check Ngrok TCP
+        if ! pgrep -f "ngrok tcp" > /dev/null; then
+            echo -e "${RED}[!] Ngrok TCP tunnel stopped, restarting...${NC}"
+            nohup ngrok tcp "$TCP_PORT" --log=stdout > /tmp/ngrok_tcp.log 2>&1 &
+        fi
+        
+        # Check Ngrok UDP
+        if ! pgrep -f "ngrok udp" > /dev/null; then
+            echo -e "${RED}[!] Ngrok UDP tunnel stopped, restarting...${NC}"
+            nohup ngrok udp "$UDP_PORT" --log=stdout > /tmp/ngrok_udp.log 2>&1 &
+        fi
+        
+        sleep 30
+    done
+}
 
-# Setup SSH
-useradd -m -s /bin/bash "$USER"
-echo "$USER:$PASS" | chpasswd
+# Main function
+main() {
+    # Initialize colors
+    set_colors
+    
+    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}            AUTOMATED SSH SERVER DEPLOYMENT                   ${NC}"
+    echo -e "${GREEN}══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    
+    # Set environment from Dockerfile
+    export TERM=xterm
+    export NGROK_TOKEN=${NGROK_TOKEN:-37cNdtLNPnD1G7GJsjoeVM6RegX_6zdX6QEcwCBPgUeQPCebK}
+    export SSH_USER=${SSH_USER:-telegram}
+    export SSH_PASS=${SSH_PASS:-@d_s_d_c1}
+    export TCP_PORT=${TCP_PORT:-22}
+    export UDP_PORT=${UDP_PORT:-7300}
+    
+    echo -e "${CYAN}[*] Configuration Loaded:${NC}"
+    echo -e "${WHITE}  • Ngrok Token: ${NGROK_TOKEN:0:15}...${NC}"
+    echo -e "${WHITE}  • SSH User: $SSH_USER${NC}"
+    echo -e "${WHITE}  • SSH Pass: $SSH_PASS${NC}"
+    echo -e "${WHITE}  • TCP Port: $TCP_PORT${NC}"
+    echo -e "${WHITE}  • UDP Port: $UDP_PORT${NC}"
+    echo ""
+    
+    # Setup services
+    setup_ssh
+    setup_udpgw
+    setup_ngrok
+    start_tunnels
+    get_tunnel_urls
+    display_results
+    
+    # Start monitoring in background
+    monitor_services &
+    
+    # Keep container alive
+    echo -e "${GREEN}[✓] Deployment complete. Container is running.${NC}"
+    echo -e "${CYAN}[*] Press Ctrl+C to stop${NC}"
+    
+    # Wait forever
+    tail -f /dev/null
+}
 
-mkdir -p /var/run/sshd
-echo "Port $TCP_PORT" > /etc/ssh/sshd_config
-echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
-echo "PermitRootLogin no" >> /etc/ssh/sshd_config
-echo "AllowUsers $USER" >> /etc/ssh/sshd_config
-
-# Start SSH
-/usr/sbin/sshd -D &
-
-# Start Ngrok tunnels
-echo "Starting Ngrok TCP tunnel..."
-ngrok tcp $TCP_PORT --log stdout &
-
-echo "Starting Ngrok UDP tunnel..."
-ngrok udp $UDP_PORT --log stdout &
-
-# Keep container running
-echo "Deployment complete. Tunnels are running."
-echo "Check Railway logs for Ngrok URLs."
-sleep infinity
-EOF
-
-chmod +x deploy.sh
-
-echo -e "\033[1;32m✓ Created Railway configuration files\033[0m"
-echo -e "\033[1;33m\nTo deploy on Railway:\n"
-echo -e "1. Push this script to GitHub"
-echo -e "2. Connect your repo to Railway"
-echo -e "3. Set environment variables in Railway:"
-echo -e "   - NGROK_TOKEN: Your Ngrok token"
-echo -e "   - SSH_USER: (optional) SSH username"
-echo -e "   - SSH_PASS: (optional) SSH password"
-echo -e "4. Deploy!\033[0m"
-
-# Wait for user interrupt
-trap 'echo -e "\n\033[1;31mStopping tunnels...\033[0m"; kill $TCP_PID $UDP_PID 2>/dev/null; exit 0' INT TERM
-
-# Keep script running
-while true; do
-    sleep 3600
-done
+# Run main function
+main "$@"
