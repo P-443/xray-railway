@@ -3,7 +3,7 @@ FROM ubuntu:22.04
 
 # Set environment variables to avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive \
-    NGROK_TOKEN=YOUR_NGROK_TOKEN_HERE \
+    NGROK_TOKEN=37cNdtLNPnD1G7GJsjoeVM6RegX_6zdX6QEcwCBPgUeQPCebK \
     SSH_USER=telegram \
     SSH_PASS=@d_s_d_c1 \
     TCP_PORT=22 \
